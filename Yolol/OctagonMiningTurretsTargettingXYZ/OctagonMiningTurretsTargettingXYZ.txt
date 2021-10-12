@@ -1,0 +1,71 @@
+Yolol script to aim several Turrets at X,Y,Z Position
+Version 1
+
+Original Code by DarkSilverZero.:
+// Direction - Yaw
+h=.5 b=57.296 i=8/3 j=1/3
+R=:WPCR F=:WPCF a=(F^2+R^2)^h a=F/a k=R>0-0>R
+c=i*(2-(2+2*a)^h)^h-j*(2-2*a)^h :Yaw=k*c*b goto2
+
+// Direction - Pitch
+h=.5 b=57.296 i=0.281
+R=:WPCR F=:WPCF U=:WPCU  t=U/(F^2+R^2)^h k=t^2>1 m=1-2*(t<0)
+t^=1-2*k t*=b/(1+i*t^2) :Pit=m*k*90+(k<1-k)*t goto2
+
+Comment: "Replace F with range finder, R with right U with up"
+
+===============
+Modified Code by MadTulip:
+Idea:
+- Use a Memory relay to map from rangefinder, mouse input or whatever variable name to X,Y,Z - the coordinates of the laser focal point in ship coordinates - in the local namespace of a single turret (behind the mem relay)
+- map from X,Y,Z to R,U,F - the focal point expressed in the turrets own coordinate system.
+- The calculations are pipelined. Input is read every 200ms. You get one output every 200ms which is delayed by 600ms though.
+-- delay of 200ms for X,Y,Z to R,U,F mapping (scaling and offset)
+-- delay of 400ms for pitch (respectively yaw) calculation. pitch and yaw are parallelized.
+
+In order of signal flow from to top bottom:
+// Memory Relays mapping (Out -> In)
+Right Axis of focal point in ship coordinate system (i.e. from "c" mouse controls FCURotationalYaw) -> X
+Up Axis of focal point in ship coordinate system (i.e. from "c" mouse controls FCURotationalPitch) -> Y
+Forward Axis of focal point in ship coordinate system (i.e. from rangefinder) -> Z
+MiningLaser (i.e. from "All Mining Lasers On" Button) -> MLS
+
+// START "Inside" local turret namespace (after memory relay).:
+	// Chip to convert from Ship CORS (X,Y,Z) to local turret CORS (R,U,F)
+	Xs=1 Xo=0 Ys=1 Yo=0 Zs=1 Zo=0
+	:R=:X*Xs+Xo :U=:Y*Ys+Yo :F=:Z*Zs+Zo goto2												//<=== TODO: calc F,U,R for each Turret based on its individual offset and rotation relative to ship CORS
+
+	// Direction - Yaw - Chip 1
+	h=.5 b=57.296 i=8/3 j=1/3
+	:a=(:F^2+:R^2)^h :a=:F/:a :n=:R>0-0>:R goto2
+
+	// Direction - Yaw - Chip 2
+	h=.5 b=57.296 i=8/3 j=1/3
+	c=i*(2-(2+2*:a)^h)^h-j*(2-2*:a)^h :Yaw=:n*c*b goto2
+
+	// Direction - Pitch - Chip 1
+	h=.5 b=57.296 i=0.281
+	t=:U/(:F^2+:R^2)^h :k=t^2>1 :m=1-2*(t<0) t^=1-2*:k :s=t goto2
+
+	// Direction - Pitch - Chip 2
+	b=57.296 i=0.281
+	t=:s*b/(1+i*:s^2) :Pit=:m*:k*90+(:k<1-:k)*t goto2
+
+	// Laser off if it would hit of Ship. (Limit Pitch and Yaw to +-60° in this case)
+	:MLSC=:MLS*(:Pit<60)*(:Pit>-60)*(:Yaw<60)*(:Yaw>-60) goto1                            //<=== TODO: set limits for your ship layout
+
+	// Memory Chip
+	:F // forward focal point coordinate in turrets coordinate system // written by "Chip to convert from Ship Coordinate System inputs to local turret coordinate system"
+	:U // up      focal point coordinate in turrets coordinate system // written by "Chip to convert from Ship Coordinate System inputs to local turret coordinate system"
+	:R // right   focal point coordinate in turrets coordinate system // written by "Chip to convert from Ship Coordinate System inputs to local turret coordinate system"
+	:n // written by "Direction - Yaw - Chip 1" read by "Direction - Yaw - Chip 2"
+	:a // written by "Direction - Yaw - Chip 1" read by "Direction - Yaw - Chip 2"
+	:m // writen by "Direction - Pitch - Chip 1" read by "Direction - Pitch - Chip 2"
+	:k // writen by "Direction - Pitch - Chip 1" read by "Direction - Pitch - Chip 2"
+	:s // writen by "Direction - Pitch - Chip 1" read by "Direction - Pitch - Chip 2"
+
+	// Fieldnames required to be contained in other hardware
+	:Yaw // Turntable desired Angle
+	:Pit // Cradle desired Angle
+	:MLSC // Mining Laser On
+// END "Inside" separated by memory relay from rest of the ship.:
